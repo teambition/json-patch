@@ -1074,3 +1074,230 @@ func TestMaintainOrderingIndented(t *testing.T) {
 		})
 	}
 }
+
+type ReadValueByPathCase struct {
+	doc, path string
+	result    []byte
+}
+
+var ReadValueByPathCases = []ReadValueByPathCase{
+	{
+		`{ "baz": "qux" }`,
+		"/baz",
+		[]byte(`"qux"`),
+	},
+	{
+		`{
+      "baz": "qux",
+      "foo": [ "a", 2, "c" ]
+    }`,
+		"/foo/0",
+		[]byte(`"a"`),
+	},
+	{
+		`{
+      "baz": "qux",
+      "foo": [ "a", 2, "c" ]
+    }`,
+		"/foo/1",
+		[]byte(`2`),
+	},
+	{
+		`{
+      "baz": "qux",
+      "foo": [ "a", 2, "c" ]
+    }`,
+		"/fooo",
+		nil,
+	},
+	{
+		`{ "foo": {} }`,
+		"/foo",
+		[]byte(`{}`),
+	},
+	{
+		`{ "foo": [ ] }`,
+		"/foo",
+		[]byte(`[]`),
+	},
+	{
+		`{ "foo": null }`,
+		"/foo",
+		[]byte(""),
+	},
+	{
+		`{ "baz/foo": "qux" }`,
+		"/baz~1foo",
+		[]byte(`"qux"`),
+	},
+}
+
+func TestReadValueByPath(t *testing.T) {
+	for _, c := range ReadValueByPathCases {
+		res, err := ReadValueByPath([]byte(c.doc), c.path, nil)
+
+		if err != nil {
+			t.Errorf("Testing failed when it should have passed: %s", err)
+		} else if !bytes.Equal(res, c.result) {
+			t.Errorf("Testing failed for [%s]: expected [%s], got [%s]", string(c.doc), string(c.result), string(res))
+		}
+	}
+}
+
+type FindChildrenByQueryCase struct {
+	doc, path string
+	value     []byte
+	result    []*ChildNode
+}
+
+var FindChildrenByQueryCases = []FindChildrenByQueryCase{
+	{
+		`{ "baz": "qux" }`,
+		"/baz",
+		[]byte(`"qux"`),
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{"baz": "qux"}`),
+		}},
+	},
+	{
+		`{
+	    "baz": "qux",
+	    "foo": [ "a", 2, "c" ]
+	  }`,
+		"/foo/0",
+		[]byte(`"a"`),
+		[]*ChildNode{{
+			Path: "",
+			Value: []byte(`{
+				"baz": "qux",
+				"foo": [ "a", 2, "c" ]
+			}`),
+		}},
+	},
+	{
+		`{
+	    "baz": "qux",
+	    "foo": [ "a", 2, "c" ]
+	  }`,
+		"/1",
+		[]byte(`2`),
+		[]*ChildNode{{
+			Path:  "/foo",
+			Value: []byte(`[ "a", 2, "c" ]`),
+		}},
+	},
+	{
+		`{
+	    "baz": "qux",
+	    "foo": [ "a", 2, "c" ]
+	  }`,
+		"/fooo",
+		nil,
+		[]*ChildNode{},
+	},
+	{
+		`{ "foo": {} }`,
+		"/foo",
+		[]byte(`{}`),
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": {} }`),
+		}},
+	},
+	{
+		`{ "foo": [ ] }`,
+		"/foo",
+		[]byte(`[]`),
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": [ ] }`),
+		}},
+	},
+	{
+		`{ "foo": null }`,
+		"/foo",
+		nil,
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": null }`),
+		}},
+	},
+	{
+		`{ "foo": null }`,
+		"/foo",
+		[]byte(""),
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": null }`),
+		}},
+	},
+	{
+		`{ "baz/foo": "qux" }`,
+		"/baz~1foo",
+		[]byte(`"qux"`),
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "baz/foo": "qux" }`),
+		}},
+	},
+	{
+		`{ "baz/foo": [ "qux" ] }`,
+		"/0",
+		[]byte(`"qux"`),
+		[]*ChildNode{{
+			Path:  "/baz~1foo",
+			Value: []byte(`["qux"]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "id1" }],
+			["object", { "id": "id2" }]
+		]`,
+		"/0",
+		[]byte(`"object"`),
+		[]*ChildNode{{
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "id1" }]`),
+		}, {
+			Path:  "/2",
+			Value: []byte(`["object", { "id": "id2" }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "id1" }],
+			["object", { "id": "id2" }]
+		]`,
+		"/1/id",
+		[]byte(`"id1"`),
+		[]*ChildNode{{
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "id1" }]`),
+		}},
+	},
+}
+
+func TestFindChildrenByQuery(t *testing.T) {
+	for i, c := range FindChildrenByQueryCases {
+		res, err := FindChildrenByQuery([]byte(c.doc), c.path, c.value, nil)
+
+		if err != nil {
+			t.Errorf("Testing failed when case %d should have passed: %s", i, err)
+		} else {
+			if len(res) != len(c.result) {
+				t.Errorf("Testing failed for case %d, %s, %s: expected %#v, got %#v", i, string(c.doc), c.path, c.result, res)
+			}
+			for i := range res {
+				if c.result[i].Path != res[i].Path {
+					t.Errorf("Testing failed for case %d, %s, %s: expected path [%s], got [%s]", i, string(c.doc), c.path, c.result[i].Path, res[i].Path)
+				} else if !Equal(c.result[i].Value, res[i].Value) {
+					t.Errorf("Testing failed for case %d, %s, %s: expected path [%s], got [%s]", i, string(c.doc), c.path, string(c.result[i].Value), string(res[i].Value))
+				}
+			}
+		}
+	}
+}

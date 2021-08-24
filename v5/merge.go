@@ -8,20 +8,18 @@ import (
 )
 
 func merge(cur, patch *lazyNode, mergeMerge bool) *lazyNode {
-	curDoc, err := cur.intoDoc()
-
-	if err != nil {
+	cur.intoContainer()
+	if cur.which != eDoc {
 		pruneNulls(patch)
 		return patch
 	}
 
-	patchDoc, err := patch.intoDoc()
-
-	if err != nil {
+	patch.intoContainer()
+	if patch.which != eDoc {
 		return patch
 	}
 
-	mergeDocs(curDoc, patchDoc, mergeMerge)
+	mergeDocs(cur.doc, patch.doc, mergeMerge)
 
 	return cur
 }
@@ -60,16 +58,12 @@ func mergeDocs(doc, patch *partialDoc, mergeMerge bool) {
 }
 
 func pruneNulls(n *lazyNode) {
-	sub, err := n.intoDoc()
-
-	if err == nil {
-		pruneDocNulls(sub)
-	} else {
-		ary, err := n.intoAry()
-
-		if err == nil {
-			pruneAryNulls(ary)
-		}
+	n.intoContainer()
+	switch n.which {
+	case eDoc:
+		pruneDocNulls(n.doc)
+	case eAry:
+		pruneAryNulls(&n.ary)
 	}
 }
 
