@@ -1279,6 +1279,32 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 			Value: []byte(`["object", { "id": "id1" }]`),
 		}},
 	},
+	{
+		`[
+			"root",
+			["object", { "id": "id1" }],
+			["object", { "id": "id2" }]
+		]`,
+		"/1",
+		[]byte(`{ "id": "id1" }`),
+		[]*ChildNode{{
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "id1" }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "id1" }],
+			["object", { "id": null }]
+		]`,
+		"/1/id",
+		[]byte(`null`),
+		[]*ChildNode{{
+			Path:  "/2",
+			Value: []byte(`["object", { "id": null }]`),
+		}},
+	},
 }
 
 func TestFindChildrenByQuery(t *testing.T) {
