@@ -44,10 +44,11 @@ var (
 )
 
 type lazyNode struct {
-	raw   *json.RawMessage
-	doc   *partialDoc
-	ary   partialArray
-	which int
+	raw       *json.RawMessage
+	compacted *json.RawMessage
+	doc       *partialDoc
+	ary       partialArray
+	which     int
 }
 
 // Operation is a single JSON-Patch step, such as a single 'add' operation.
@@ -278,20 +279,28 @@ func (n *lazyNode) intoContainer() container {
 	return nil
 }
 
-func (n *lazyNode) compact() []byte {
-	buf := &bytes.Buffer{}
+func (n *lazyNode) isNull() bool {
+	return n.raw == nil || len(*n.raw) == 0 || string(*n.raw) == "null"
+}
 
+func (n *lazyNode) compact() []byte {
 	if n.raw == nil {
 		return nil
 	}
 
-	err := json.Compact(buf, *n.raw)
+	if n.compacted == nil {
+		buf := &bytes.Buffer{}
+		err := json.Compact(buf, *n.raw)
 
-	if err != nil {
-		return *n.raw
+		if err != nil {
+			n.compacted = n.raw
+			return *n.raw
+		} else {
+			b := json.RawMessage(buf.Bytes())
+			n.compacted = &b
+		}
 	}
-
-	return buf.Bytes()
+	return *n.compacted
 }
 
 func (n *lazyNode) equal(o *lazyNode) bool {
@@ -1071,11 +1080,11 @@ func FindChildrenByQuery(doc []byte, querypath string, value []byte, options *Ap
 		return []*ChildNode{}, nil
 	}
 	node := newLazyNode(newRawMessage(doc))
-	lv := newLazyNode(newRawMessage(value))
-	return iterateObject(node, lv, "", subpaths[1:], options)
+	v := newLazyNode(newRawMessage(value))
+	return findChildNodes(node, v, "", subpaths[1:], options)
 }
 
-func iterateObject(node, value *lazyNode, parentpath string, subpaths []string, options *ApplyOptions) (res []*ChildNode, err error) {
+func findChildNodes(node, value *lazyNode, parentpath string, subpaths []string, options *ApplyOptions) (res []*ChildNode, err error) {
 
 	node.intoContainer()
 	if node.which == eOther {
@@ -1092,7 +1101,7 @@ func iterateObject(node, value *lazyNode, parentpath string, subpaths []string, 
 			if n == nil {
 				continue
 			}
-			r, e := iterateObject(n, value, fmt.Sprintf("%s/%d", parentpath, i), subpaths, options)
+			r, e := findChildNodes(n, value, fmt.Sprintf("%s/%d", parentpath, i), subpaths, options)
 			if e != nil {
 				return nil, e
 			}
@@ -1105,7 +1114,7 @@ func iterateObject(node, value *lazyNode, parentpath string, subpaths []string, 
 			if n == nil {
 				continue
 			}
-			r, e := iterateObject(n, value, fmt.Sprintf("%s/%s", parentpath, encodePatchKey(k)), subpaths, options)
+			r, e := findChildNodes(n, value, fmt.Sprintf("%s/%s", parentpath, encodePatchKey(k)), subpaths, options)
 			if e != nil {
 				return nil, e
 			}
@@ -1131,7 +1140,7 @@ func assertObject(node *lazyNode, subpaths []string, value *lazyNode, options *A
 		}
 		if i == last {
 			if next == nil {
-				return value.raw == nil || len(*value.raw) == 0
+				return value.isNull()
 			}
 			return next.equal(value)
 		}
