@@ -1144,17 +1144,16 @@ func TestReadValueByPath(t *testing.T) {
 	}
 }
 
-type FindChildrenByQueryCase struct {
-	doc, path string
-	value     []byte
-	result    []*ChildNode
+type FindChildrenByFiltersCase struct {
+	doc     string
+	filters []Filter
+	result  []*ChildNode
 }
 
-var FindChildrenByQueryCases = []FindChildrenByQueryCase{
+var FindChildrenByFiltersCases = []FindChildrenByFiltersCase{
 	{
 		`{ "baz": "qux" }`,
-		"/baz",
-		[]byte(`"qux"`),
+		[]Filter{{"/baz": []byte(`"qux"`)}},
 		[]*ChildNode{{
 			Path:  "",
 			Value: []byte(`{"baz": "qux"}`),
@@ -1165,8 +1164,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	    "baz": "qux",
 	    "foo": [ "a", 2, "c" ]
 	  }`,
-		"/foo/0",
-		[]byte(`"a"`),
+		[]Filter{{"/foo/0": []byte(`"a"`)}},
 		[]*ChildNode{{
 			Path: "",
 			Value: []byte(`{
@@ -1180,8 +1178,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	    "baz": "qux",
 	    "foo": [ "a", 2, "c" ]
 	  }`,
-		"/1",
-		[]byte(`2`),
+		[]Filter{{"/1": []byte(`2`)}},
 		[]*ChildNode{{
 			Path:  "/foo",
 			Value: []byte(`[ "a", 2, "c" ]`),
@@ -1192,14 +1189,12 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	    "baz": "qux",
 	    "foo": [ "a", 2, "c" ]
 	  }`,
-		"/fooo",
-		nil,
+		[]Filter{{"/fooo": nil}},
 		[]*ChildNode{},
 	},
 	{
 		`{ "foo": {} }`,
-		"/foo",
-		[]byte(`{}`),
+		[]Filter{{"/foo": []byte(`{}`)}},
 		[]*ChildNode{{
 			Path:  "",
 			Value: []byte(`{ "foo": {} }`),
@@ -1207,8 +1202,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	},
 	{
 		`{ "foo": [ ] }`,
-		"/foo",
-		[]byte(`[]`),
+		[]Filter{{"/foo": []byte(`[]`)}},
 		[]*ChildNode{{
 			Path:  "",
 			Value: []byte(`{ "foo": [ ] }`),
@@ -1216,8 +1210,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	},
 	{
 		`{ "foo": null }`,
-		"/foo",
-		nil,
+		[]Filter{{"/foo": nil}},
 		[]*ChildNode{{
 			Path:  "",
 			Value: []byte(`{ "foo": null }`),
@@ -1225,8 +1218,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	},
 	{
 		`{ "foo": null }`,
-		"/foo",
-		[]byte(""),
+		[]Filter{{"/foo": []byte("")}},
 		[]*ChildNode{{
 			Path:  "",
 			Value: []byte(`{ "foo": null }`),
@@ -1234,8 +1226,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	},
 	{
 		`{ "foo": null }`,
-		"/foo",
-		[]byte("null"),
+		[]Filter{{"/foo": []byte("null")}},
 		[]*ChildNode{{
 			Path:  "",
 			Value: []byte(`{ "foo": null }`),
@@ -1243,8 +1234,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	},
 	{
 		`{ "foo": "" }`,
-		"/foo",
-		[]byte(`""`),
+		[]Filter{{"/foo": []byte(`""`)}},
 		[]*ChildNode{{
 			Path:  "",
 			Value: []byte(`{ "foo": "" }`),
@@ -1252,8 +1242,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	},
 	{
 		`{ "baz/foo": "qux" }`,
-		"/baz~1foo",
-		[]byte(`"qux"`),
+		[]Filter{{"/baz~1foo": []byte(`"qux"`)}},
 		[]*ChildNode{{
 			Path:  "",
 			Value: []byte(`{ "baz/foo": "qux" }`),
@@ -1261,8 +1250,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	},
 	{
 		`{ "baz/foo": [ "qux" ] }`,
-		"/0",
-		[]byte(`"qux"`),
+		[]Filter{{"/0": []byte(`"qux"`)}},
 		[]*ChildNode{{
 			Path:  "/baz~1foo",
 			Value: []byte(`["qux"]`),
@@ -1274,8 +1262,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 			["object", { "id": "id1" }],
 			["object", { "id": "id2" }]
 		]`,
-		"/0",
-		[]byte(`"object"`),
+		[]Filter{{"/0": []byte(`"object"`)}},
 		[]*ChildNode{{
 			Path:  "/1",
 			Value: []byte(`["object", { "id": "id1" }]`),
@@ -1290,8 +1277,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 			["object", { "id": "id1" }],
 			["object", { "id": "id2" }]
 		]`,
-		"/1/id",
-		[]byte(`"id1"`),
+		[]Filter{{"/1/id": []byte(`"id1"`)}},
 		[]*ChildNode{{
 			Path:  "/1",
 			Value: []byte(`["object", { "id": "id1" }]`),
@@ -1303,8 +1289,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 			["object", { "id": "id1" }],
 			["object", { "id": "id2" }]
 		]`,
-		"/1",
-		[]byte(`{ "id": "id1" }`),
+		[]Filter{{"/1": []byte(`{ "id": "id1" }`)}},
 		[]*ChildNode{{
 			Path:  "/1",
 			Value: []byte(`["object", { "id": "id1" }]`),
@@ -1316,8 +1301,7 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 			["object", { "id": "" }],
 			["object", { "id": null }]
 		]`,
-		"/1/id",
-		[]byte(`""`),
+		[]Filter{{"/1/id": []byte(`""`)}},
 		[]*ChildNode{{
 			Path:  "/1",
 			Value: []byte(`["object", { "id": "" }]`),
@@ -1329,30 +1313,88 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 			["object", { "id": "" }],
 			["object", { "id": null }]
 		]`,
-		"/1/id",
-		[]byte(`null`),
+		[]Filter{{"/1/id": []byte(`null`)}},
 		[]*ChildNode{{
 			Path:  "/2",
 			Value: []byte(`["object", { "id": null }]`),
 		}},
 	},
+	{
+		`[
+			"root",
+			["object", { "id": "" }],
+			["object", { "id": null }]
+		]`,
+		[]Filter{{"/1/id": []byte(`null`)}, {"/1/id": []byte(`""`)}},
+		[]*ChildNode{{
+			Path:  "/2",
+			Value: []byte(`["object", { "id": null }]`),
+		}, {
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "" }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object1", { "id": "" }],
+			["object2", { "id": null }]
+		]`,
+		[]Filter{{"/0": []byte(`"object2"`), "/1/id": []byte(`null`)}},
+		[]*ChildNode{{
+			Path:  "/2",
+			Value: []byte(`["object2", { "id": null }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object1", { "id": "" }],
+			["object2", { "id": null }]
+		]`,
+		[]Filter{{"/0": []byte(`"root"`), "/1/0": []byte(`"object1"`), "/1/1/id": []byte(`""`)}},
+		[]*ChildNode{{
+			Path: "",
+			Value: []byte(`[
+				"root",
+				["object1", { "id": "" }],
+				["object2", { "id": null }]
+			]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object1", { "id": "" }],
+			["object2", { "id": null }]
+		]`,
+		[]Filter{{"/0": []byte(`"root"`), "/1/0": []byte(`"object1"`), "/1/1/id": []byte(`""`), "/2": []byte(`["object2", { "id": null }]`)}},
+		[]*ChildNode{{
+			Path: "",
+			Value: []byte(`[
+				"root",
+				["object1", { "id": "" }],
+				["object2", { "id": null }]
+			]`),
+		}},
+	},
 }
 
 func TestFindChildrenByQuery(t *testing.T) {
-	for i, c := range FindChildrenByQueryCases {
-		res, err := FindChildrenByQuery([]byte(c.doc), c.path, c.value, nil)
+	for i, c := range FindChildrenByFiltersCases {
+		res, err := FindChildrenByFilters([]byte(c.doc), c.filters, nil)
 
 		if err != nil {
 			t.Errorf("Testing failed when case %d should have passed: %s", i, err)
 		} else {
 			if len(res) != len(c.result) {
-				t.Errorf("Testing failed for case %d, %s, %s: expected %#v, got %#v", i, string(c.doc), c.path, c.result, res)
+				t.Errorf("Testing failed for case %d, %v, %s: expected %#v, got %#v", i, string(c.doc), c.filters, c.result, res)
 			}
 			for j := range res {
 				if c.result[j].Path != res[j].Path {
-					t.Errorf("Testing failed for case %d, %s, %s: expected path [%s], got [%s]", i, string(c.doc), c.path, c.result[j].Path, res[j].Path)
+					t.Errorf("Testing failed for case %d, %v, %s: expected path [%s], got [%s]", i, string(c.doc), c.filters, c.result[j].Path, res[j].Path)
 				} else if !Equal(c.result[j].Value, res[j].Value) {
-					t.Errorf("Testing failed for case %d, %s, %s: expected path [%s], got [%s]", i, string(c.doc), c.path, string(c.result[j].Value), string(res[j].Value))
+					t.Errorf("Testing failed for case %d, %v, %s: expected path [%s], got [%s]", i, string(c.doc), c.filters, string(c.result[j].Value), string(res[j].Value))
 				}
 			}
 		}

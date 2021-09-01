@@ -1068,20 +1068,66 @@ func ReadValueByPath(doc []byte, path string, options *ApplyOptions) ([]byte, er
 type ChildNode struct {
 	Path  string          `json:"path"`
 	Value json.RawMessage `json:"value"`
+	node  *lazyNode
 }
 
-func FindChildrenByQuery(doc []byte, querypath string, value []byte, options *ApplyOptions) ([]*ChildNode, error) {
-	subpaths := strings.Split(querypath, "/")
-	if len(subpaths) < 2 {
-		return nil, fmt.Errorf("Invalid query path: %s", querypath)
-	}
+type Filter map[string]json.RawMessage
 
-	if len(doc) == 0 {
-		return []*ChildNode{}, nil
+func FindChildrenByFilters(doc []byte, filters []Filter, options *ApplyOptions) (nodes []*ChildNode, err error) {
+	if len(filters) == 0 {
+		return
 	}
 	node := newLazyNode(newRawMessage(doc))
-	v := newLazyNode(newRawMessage(value))
-	return findChildNodes(node, v, "", subpaths[1:], options)
+	for _, filter := range filters {
+		keys := make([]string, 0, len(filter))
+		for querypath := range filter {
+			keys = append(keys, querypath)
+		}
+		if len(keys) == 0 {
+			continue
+		}
+
+		subpaths, err := toSubpaths(keys[0])
+		if err != nil {
+			return nil, err
+		}
+		value := filter[keys[0]]
+		v := newLazyNode(&value)
+		keys = keys[1:]
+
+		ns, err := findChildNodes(node, v, "", subpaths, options)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range keys {
+			subpaths, err := toSubpaths(key)
+			if err != nil {
+				return nil, err
+			}
+			value := filter[key]
+			v := newLazyNode(&value)
+			_ns := make([]*ChildNode, 0, len(ns))
+			for _, n := range ns {
+				if assertObject(n.node, subpaths, v, options) {
+					_ns = append(_ns, n)
+				}
+			}
+			ns = _ns
+			if len(ns) == 0 {
+				break
+			}
+		}
+		nodes = append(nodes, ns...)
+	}
+	return
+}
+
+func toSubpaths(s string) ([]string, error) {
+	subpaths := strings.Split(s, "/")
+	if len(subpaths) < 2 || subpaths[0] != "" {
+		return nil, fmt.Errorf("Invalid query path: %s", s)
+	}
+	return subpaths[1:], nil
 }
 
 func findChildNodes(node, value *lazyNode, parentpath string, subpaths []string, options *ApplyOptions) (res []*ChildNode, err error) {
@@ -1092,7 +1138,7 @@ func findChildNodes(node, value *lazyNode, parentpath string, subpaths []string,
 	}
 
 	if assertObject(node, subpaths, value, options) {
-		res = append(res, &ChildNode{Path: parentpath, Value: *node.raw})
+		res = append(res, &ChildNode{Path: parentpath, Value: *node.raw, node: node})
 		return
 	}
 
