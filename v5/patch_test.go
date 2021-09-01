@@ -1233,6 +1233,24 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 		}},
 	},
 	{
+		`{ "foo": null }`,
+		"/foo",
+		[]byte("null"),
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": null }`),
+		}},
+	},
+	{
+		`{ "foo": "" }`,
+		"/foo",
+		[]byte(`""`),
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": "" }`),
+		}},
+	},
+	{
 		`{ "baz/foo": "qux" }`,
 		"/baz~1foo",
 		[]byte(`"qux"`),
@@ -1295,7 +1313,20 @@ var FindChildrenByQueryCases = []FindChildrenByQueryCase{
 	{
 		`[
 			"root",
-			["object", { "id": "id1" }],
+			["object", { "id": "" }],
+			["object", { "id": null }]
+		]`,
+		"/1/id",
+		[]byte(`""`),
+		[]*ChildNode{{
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "" }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "" }],
 			["object", { "id": null }]
 		]`,
 		"/1/id",
@@ -1317,11 +1348,11 @@ func TestFindChildrenByQuery(t *testing.T) {
 			if len(res) != len(c.result) {
 				t.Errorf("Testing failed for case %d, %s, %s: expected %#v, got %#v", i, string(c.doc), c.path, c.result, res)
 			}
-			for i := range res {
-				if c.result[i].Path != res[i].Path {
-					t.Errorf("Testing failed for case %d, %s, %s: expected path [%s], got [%s]", i, string(c.doc), c.path, c.result[i].Path, res[i].Path)
-				} else if !Equal(c.result[i].Value, res[i].Value) {
-					t.Errorf("Testing failed for case %d, %s, %s: expected path [%s], got [%s]", i, string(c.doc), c.path, string(c.result[i].Value), string(res[i].Value))
+			for j := range res {
+				if c.result[j].Path != res[j].Path {
+					t.Errorf("Testing failed for case %d, %s, %s: expected path [%s], got [%s]", i, string(c.doc), c.path, c.result[j].Path, res[j].Path)
+				} else if !Equal(c.result[j].Value, res[j].Value) {
+					t.Errorf("Testing failed for case %d, %s, %s: expected path [%s], got [%s]", i, string(c.doc), c.path, string(c.result[j].Value), string(res[j].Value))
 				}
 			}
 		}
