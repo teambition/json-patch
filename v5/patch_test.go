@@ -1378,6 +1378,74 @@ var FindChildrenByFiltersCases = []FindChildrenByFiltersCase{
 			]`),
 		}},
 	},
+	{
+		`["root", ["p",
+			["span", {"data-type": "text"},
+				["span", {"data-type": "leaf"}, "Hello 1"],
+				["span", {"data-type": "leaf"}, "Hello 2"],
+				["span", {"data-type": "leaf"}, "Hello 3"],
+				["span", {"data-type": null}, "Hello 4"]
+			]
+		]]`,
+		[]Filter{{"/0": []byte(`"span"`), "/1/data-type": []byte(`"leaf"`)}},
+		[]*ChildNode{{
+			Path:  "/1/1/2",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 1"]`),
+		}, {
+			Path:  "/1/1/3",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 2"]`),
+		}, {
+			Path:  "/1/1/4",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 3"]`),
+		}},
+	},
+	{
+		`["root", ["p",
+			["span", {"data-type": "text"},
+				["span", {"data-type": "leaf"}, "Hello 1"],
+				["span", {"data-type": "leaf"}, "Hello 2"],
+				["span", {"data-type": "leaf"}, "Hello 3"],
+				["span", {"data-type": null}, "Hello 4"]
+			]
+		]]`,
+		[]Filter{{"/0": []byte(`"span"`), "/1/data-type": nil}},
+		[]*ChildNode{{
+			Path:  "/1/1/5",
+			Value: []byte(`["span", {"data-type": null}, "Hello 4"]`),
+		}},
+	},
+	{
+		`["root", ["p",
+			["span", {"data-type": "text"},
+				["span", {"data-type": "leaf"}, "Hello 1"],
+				["span", {"data-type": "leaf"}, "Hello 2"],
+				["span", {"data-type": "leaf"}, "Hello 3"],
+				["span", {"data-type": null}, "Hello 4"]
+			]
+		]]`,
+		[]Filter{{"/0": []byte(`"span"`)}},
+		[]*ChildNode{{
+			Path: "/1/1",
+			Value: []byte(`["span", {"data-type": "text"},
+			["span", {"data-type": "leaf"}, "Hello 1"],
+			["span", {"data-type": "leaf"}, "Hello 2"],
+			["span", {"data-type": "leaf"}, "Hello 3"],
+			["span", {"data-type": null}, "Hello 4"]
+		]`),
+		}, {
+			Path:  "/1/1/2",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 1"]`),
+		}, {
+			Path:  "/1/1/3",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 2"]`),
+		}, {
+			Path:  "/1/1/4",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 3"]`),
+		}, {
+			Path:  "/1/1/5",
+			Value: []byte(`["span", {"data-type": null}, "Hello 4"]`),
+		}},
+	},
 }
 
 func TestFindChildrenByQuery(t *testing.T) {

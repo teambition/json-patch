@@ -1139,7 +1139,6 @@ func findChildNodes(node, value *lazyNode, parentpath string, subpaths []string,
 
 	if assertObject(node, subpaths, value, options) {
 		res = append(res, &ChildNode{Path: parentpath, Value: *node.raw, node: node})
-		return
 	}
 
 	if node.which == eAry {
