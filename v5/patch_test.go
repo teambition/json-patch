@@ -542,34 +542,35 @@ var Cases = []Case{
 	},
 	{
 		`{
-	"id": "00000000-0000-0000-0000-000000000000",
-	"parentID": "00000000-0000-0000-0000-000000000000"
-}`,
+			"id": "00000000-0000-0000-0000-000000000000",
+			"parentID": "00000000-0000-0000-0000-000000000000"
+		}`,
 		`[
-  {
-    "op": "test",
-    "path": "",
-    "value": {
-      "id": "00000000-0000-0000-0000-000000000000",
-      "parentID": "00000000-0000-0000-0000-000000000000"
-    }
-  },
-  {
-    "op": "replace",
-    "path": "",
-    "value": {
-      "id": "759981e8-ec68-4639-a83e-513225914ecb",
-      "originalID": "bar",
-      "parentID": "00000000-0000-0000-0000-000000000000"
-    }
-  }
-]`,
+			{
+				"op": "test",
+				"path": "",
+				"value": {
+					"id": "00000000-0000-0000-0000-000000000000",
+					"parentID": "00000000-0000-0000-0000-000000000000"
+				}
+			},
+			{
+				"op": "replace",
+				"path": "",
+				"value": {
+					"id": "759981e8-ec68-4639-a83e-513225914ecb",
+					"originalID": "bar",
+					"parentID": "00000000-0000-0000-0000-000000000000"
+				}
+			}
+		]`,
 		`{
-  "id" : "759981e8-ec68-4639-a83e-513225914ecb",
-  "originalID" : "bar",
-  "parentID" : "00000000-0000-0000-0000-000000000000"
-}`,
-		false, true,
+			"id" : "759981e8-ec68-4639-a83e-513225914ecb",
+			"originalID" : "bar",
+			"parentID" : "00000000-0000-0000-0000-000000000000"
+		}`,
+		false,
+		true,
 	},
 }
 
@@ -1131,5 +1132,399 @@ func TestMaintainOrderingIndented(t *testing.T) {
 				t.Errorf("expected:\n%s\ngot:\n%s", c.expected, res)
 			}
 		})
+	}
+}
+
+type ReadValueByPathCase struct {
+	doc, path string
+	result    []byte
+}
+
+var ReadValueByPathCases = []ReadValueByPathCase{
+	{
+		`{ "baz": "qux" }`,
+		"/baz",
+		[]byte(`"qux"`),
+	},
+	{
+		`{
+      "baz": "qux",
+      "foo": [ "a", 2, "c" ]
+    }`,
+		"/foo/0",
+		[]byte(`"a"`),
+	},
+	{
+		`{
+      "baz": "qux",
+      "foo": [ "a", 2, "c" ]
+    }`,
+		"/foo/1",
+		[]byte(`2`),
+	},
+	{
+		`{
+      "baz": "qux",
+      "foo": [ "a", 2, "c" ]
+    }`,
+		"/fooo",
+		nil,
+	},
+	{
+		`{ "foo": {} }`,
+		"/foo",
+		[]byte(`{}`),
+	},
+	{
+		`{ "foo": [ ] }`,
+		"/foo",
+		[]byte(`[]`),
+	},
+	{
+		`{ "foo": null }`,
+		"/foo",
+		[]byte(""),
+	},
+	{
+		`{ "baz/foo": "qux" }`,
+		"/baz~1foo",
+		[]byte(`"qux"`),
+	},
+}
+
+func TestReadValueByPath(t *testing.T) {
+	for _, c := range ReadValueByPathCases {
+		res, err := ReadValueByPath([]byte(c.doc), c.path, nil)
+
+		if err != nil {
+			t.Errorf("Testing failed when it should have passed: %s", err)
+		} else if !bytes.Equal(res, c.result) {
+			t.Errorf("Testing failed for [%s]: expected [%s], got [%s]", string(c.doc), string(c.result), string(res))
+		}
+	}
+}
+
+type FindChildrenByFiltersCase struct {
+	doc     string
+	filters []Filter
+	result  []*ChildNode
+}
+
+var FindChildrenByFiltersCases = []FindChildrenByFiltersCase{
+	{
+		`{ "baz": "qux" }`,
+		[]Filter{{"/baz": []byte(`"qux"`)}},
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{"baz": "qux"}`),
+		}},
+	},
+	{
+		`{
+	    "baz": "qux",
+	    "foo": [ "a", 2, "c" ]
+	  }`,
+		[]Filter{{"/foo/0": []byte(`"a"`)}},
+		[]*ChildNode{{
+			Path: "",
+			Value: []byte(`{
+				"baz": "qux",
+				"foo": [ "a", 2, "c" ]
+			}`),
+		}},
+	},
+	{
+		`{
+	    "baz": "qux",
+	    "foo": [ "a", 2, "c" ]
+	  }`,
+		[]Filter{{"/1": []byte(`2`)}},
+		[]*ChildNode{{
+			Path:  "/foo",
+			Value: []byte(`[ "a", 2, "c" ]`),
+		}},
+	},
+	{
+		`{
+	    "baz": "qux",
+	    "foo": [ "a", 2, "c" ]
+	  }`,
+		[]Filter{{"/fooo": nil}},
+		[]*ChildNode{},
+	},
+	{
+		`{ "foo": {} }`,
+		[]Filter{{"/foo": []byte(`{}`)}},
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": {} }`),
+		}},
+	},
+	{
+		`{ "foo": [ ] }`,
+		[]Filter{{"/foo": []byte(`[]`)}},
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": [ ] }`),
+		}},
+	},
+	{
+		`{ "foo": null }`,
+		[]Filter{{"/foo": nil}},
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": null }`),
+		}},
+	},
+	{
+		`{ "foo": null }`,
+		[]Filter{{"/foo": []byte("")}},
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": null }`),
+		}},
+	},
+	{
+		`{ "foo": null }`,
+		[]Filter{{"/foo": []byte("null")}},
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": null }`),
+		}},
+	},
+	{
+		`{ "foo": "" }`,
+		[]Filter{{"/foo": []byte(`""`)}},
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "foo": "" }`),
+		}},
+	},
+	{
+		`{ "baz/foo": "qux" }`,
+		[]Filter{{"/baz~1foo": []byte(`"qux"`)}},
+		[]*ChildNode{{
+			Path:  "",
+			Value: []byte(`{ "baz/foo": "qux" }`),
+		}},
+	},
+	{
+		`{ "baz/foo": [ "qux" ] }`,
+		[]Filter{{"/0": []byte(`"qux"`)}},
+		[]*ChildNode{{
+			Path:  "/baz~1foo",
+			Value: []byte(`["qux"]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "id1" }],
+			["object", { "id": "id2" }]
+		]`,
+		[]Filter{{"/0": []byte(`"object"`)}},
+		[]*ChildNode{{
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "id1" }]`),
+		}, {
+			Path:  "/2",
+			Value: []byte(`["object", { "id": "id2" }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "id1" }],
+			["object", { "id": "id2" }]
+		]`,
+		[]Filter{{"/1/id": []byte(`"id1"`)}},
+		[]*ChildNode{{
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "id1" }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "id1" }],
+			["object", { "id": "id2" }]
+		]`,
+		[]Filter{{"/1": []byte(`{ "id": "id1" }`)}},
+		[]*ChildNode{{
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "id1" }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "" }],
+			["object", { "id": null }]
+		]`,
+		[]Filter{{"/1/id": []byte(`""`)}},
+		[]*ChildNode{{
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "" }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "" }],
+			["object", { "id": null }]
+		]`,
+		[]Filter{{"/1/id": []byte(`null`)}},
+		[]*ChildNode{{
+			Path:  "/2",
+			Value: []byte(`["object", { "id": null }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object", { "id": "" }],
+			["object", { "id": null }]
+		]`,
+		[]Filter{{"/1/id": []byte(`null`)}, {"/1/id": []byte(`""`)}},
+		[]*ChildNode{{
+			Path:  "/2",
+			Value: []byte(`["object", { "id": null }]`),
+		}, {
+			Path:  "/1",
+			Value: []byte(`["object", { "id": "" }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object1", { "id": "" }],
+			["object2", { "id": null }]
+		]`,
+		[]Filter{{"/0": []byte(`"object2"`), "/1/id": []byte(`null`)}},
+		[]*ChildNode{{
+			Path:  "/2",
+			Value: []byte(`["object2", { "id": null }]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object1", { "id": "" }],
+			["object2", { "id": null }]
+		]`,
+		[]Filter{{"/0": []byte(`"root"`), "/1/0": []byte(`"object1"`), "/1/1/id": []byte(`""`)}},
+		[]*ChildNode{{
+			Path: "",
+			Value: []byte(`[
+				"root",
+				["object1", { "id": "" }],
+				["object2", { "id": null }]
+			]`),
+		}},
+	},
+	{
+		`[
+			"root",
+			["object1", { "id": "" }],
+			["object2", { "id": null }]
+		]`,
+		[]Filter{{"/0": []byte(`"root"`), "/1/0": []byte(`"object1"`), "/1/1/id": []byte(`""`), "/2": []byte(`["object2", { "id": null }]`)}},
+		[]*ChildNode{{
+			Path: "",
+			Value: []byte(`[
+				"root",
+				["object1", { "id": "" }],
+				["object2", { "id": null }]
+			]`),
+		}},
+	},
+	{
+		`["root", ["p",
+			["span", {"data-type": "text"},
+				["span", {"data-type": "leaf"}, "Hello 1"],
+				["span", {"data-type": "leaf"}, "Hello 2"],
+				["span", {"data-type": "leaf"}, "Hello 3"],
+				["span", {"data-type": null}, "Hello 4"]
+			]
+		]]`,
+		[]Filter{{"/0": []byte(`"span"`), "/1/data-type": []byte(`"leaf"`)}},
+		[]*ChildNode{{
+			Path:  "/1/1/2",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 1"]`),
+		}, {
+			Path:  "/1/1/3",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 2"]`),
+		}, {
+			Path:  "/1/1/4",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 3"]`),
+		}},
+	},
+	{
+		`["root", ["p",
+			["span", {"data-type": "text"},
+				["span", {"data-type": "leaf"}, "Hello 1"],
+				["span", {"data-type": "leaf"}, "Hello 2"],
+				["span", {"data-type": "leaf"}, "Hello 3"],
+				["span", {"data-type": null}, "Hello 4"]
+			]
+		]]`,
+		[]Filter{{"/0": []byte(`"span"`), "/1/data-type": nil}},
+		[]*ChildNode{{
+			Path:  "/1/1/5",
+			Value: []byte(`["span", {"data-type": null}, "Hello 4"]`),
+		}},
+	},
+	{
+		`["root", ["p",
+			["span", {"data-type": "text"},
+				["span", {"data-type": "leaf"}, "Hello 1"],
+				["span", {"data-type": "leaf"}, "Hello 2"],
+				["span", {"data-type": "leaf"}, "Hello 3"],
+				["span", {"data-type": null}, "Hello 4"]
+			]
+		]]`,
+		[]Filter{{"/0": []byte(`"span"`)}},
+		[]*ChildNode{{
+			Path: "/1/1",
+			Value: []byte(`["span", {"data-type": "text"},
+			["span", {"data-type": "leaf"}, "Hello 1"],
+			["span", {"data-type": "leaf"}, "Hello 2"],
+			["span", {"data-type": "leaf"}, "Hello 3"],
+			["span", {"data-type": null}, "Hello 4"]
+		]`),
+		}, {
+			Path:  "/1/1/2",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 1"]`),
+		}, {
+			Path:  "/1/1/3",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 2"]`),
+		}, {
+			Path:  "/1/1/4",
+			Value: []byte(`["span", {"data-type": "leaf"}, "Hello 3"]`),
+		}, {
+			Path:  "/1/1/5",
+			Value: []byte(`["span", {"data-type": null}, "Hello 4"]`),
+		}},
+	},
+}
+
+func TestFindChildrenByQuery(t *testing.T) {
+	for i, c := range FindChildrenByFiltersCases {
+		res, err := FindChildrenByFilters([]byte(c.doc), c.filters, nil)
+
+		if err != nil {
+			t.Errorf("Testing failed when case %d should have passed: %s", i, err)
+		} else {
+			if len(res) != len(c.result) {
+				t.Errorf("Testing failed for case %d, %v, %s: expected %#v, got %#v", i, string(c.doc), c.filters, c.result, res)
+			}
+			for j := range res {
+				if c.result[j].Path != res[j].Path {
+					t.Errorf("Testing failed for case %d, %v, %s: expected path [%s], got [%s]", i, string(c.doc), c.filters, c.result[j].Path, res[j].Path)
+				} else if !Equal(c.result[j].Value, res[j].Value) {
+					t.Errorf("Testing failed for case %d, %v, %s: expected path [%s], got [%s]", i, string(c.doc), c.filters, string(c.result[j].Value), string(res[j].Value))
+				}
+			}
+		}
 	}
 }

@@ -14,6 +14,7 @@ const (
 	eRaw = iota
 	eDoc
 	eAry
+	eOther
 )
 
 var (
@@ -43,10 +44,11 @@ var (
 )
 
 type lazyNode struct {
-	raw   *json.RawMessage
-	doc   *partialDoc
-	ary   partialArray
-	which int
+	raw       *json.RawMessage
+	compacted *json.RawMessage
+	doc       *partialDoc
+	ary       partialArray
+	which     int
 }
 
 // Operation is a single JSON-Patch step, such as a single 'add' operation.
@@ -109,7 +111,7 @@ func newRawMessage(buf []byte) *json.RawMessage {
 
 func (n *lazyNode) MarshalJSON() ([]byte, error) {
 	switch n.which {
-	case eRaw:
+	case eRaw, eOther:
 		return json.Marshal(n.raw)
 	case eDoc:
 		return json.Marshal(n.doc)
@@ -243,112 +245,86 @@ func deepCopy(src *lazyNode) (*lazyNode, int, error) {
 	return newLazyNode(newRawMessage(a)), sz, nil
 }
 
-func (n *lazyNode) intoDoc() (*partialDoc, error) {
-	if n.which == eDoc {
-		return n.doc, nil
+func (n *lazyNode) intoContainer() container {
+	switch n.which {
+	case eDoc:
+		return n.doc
+	case eAry:
+		return &n.ary
+	case eOther:
+		return nil
 	}
 
+	n.which = eOther
 	if n.raw == nil {
-		return nil, ErrInvalid
+		return nil
 	}
-
-	err := json.Unmarshal(*n.raw, &n.doc)
-
-	if err != nil {
-		return nil, err
+	switch checkWhich(*n.raw) {
+	case eDoc:
+		err := json.Unmarshal(*n.raw, &n.doc)
+		if err != nil {
+			return nil
+		}
+		n.which = eDoc
+		return n.doc
+	case eAry:
+		err := json.Unmarshal(*n.raw, &n.ary)
+		n.which = eOther
+		if err != nil {
+			return nil
+		}
+		n.which = eAry
+		return &n.ary
 	}
-
-	n.which = eDoc
-	return n.doc, nil
+	return nil
 }
 
-func (n *lazyNode) intoAry() (*partialArray, error) {
-	if n.which == eAry {
-		return &n.ary, nil
-	}
-
-	if n.raw == nil {
-		return nil, ErrInvalid
-	}
-
-	err := json.Unmarshal(*n.raw, &n.ary)
-
-	if err != nil {
-		return nil, err
-	}
-
-	n.which = eAry
-	return &n.ary, nil
+func (n *lazyNode) isNull() bool {
+	return n.raw == nil || len(*n.raw) == 0 || string(*n.raw) == "null"
 }
 
 func (n *lazyNode) compact() []byte {
-	buf := &bytes.Buffer{}
-
 	if n.raw == nil {
 		return nil
 	}
 
-	err := json.Compact(buf, *n.raw)
+	if n.compacted == nil {
+		buf := &bytes.Buffer{}
+		err := json.Compact(buf, *n.raw)
 
-	if err != nil {
-		return *n.raw
+		if err != nil {
+			n.compacted = n.raw
+			return *n.raw
+		} else {
+			b := json.RawMessage(buf.Bytes())
+			n.compacted = &b
+		}
 	}
-
-	return buf.Bytes()
-}
-
-func (n *lazyNode) tryDoc() bool {
-	if n.raw == nil {
-		return false
-	}
-
-	err := json.Unmarshal(*n.raw, &n.doc)
-
-	if err != nil {
-		return false
-	}
-
-	n.which = eDoc
-	return true
-}
-
-func (n *lazyNode) tryAry() bool {
-	if n.raw == nil {
-		return false
-	}
-
-	err := json.Unmarshal(*n.raw, &n.ary)
-
-	if err != nil {
-		return false
-	}
-
-	n.which = eAry
-	return true
+	return *n.compacted
 }
 
 func (n *lazyNode) equal(o *lazyNode) bool {
 	if n.which == eRaw {
-		if !n.tryDoc() && !n.tryAry() {
-			if o.which != eRaw {
-				return false
-			}
-
-			return bytes.Equal(n.compact(), o.compact())
-		}
+		n.intoContainer()
 	}
 
-	if n.which == eDoc {
-		if o.which == eRaw {
-			if !o.tryDoc() {
-				return false
-			}
-		}
-
-		if o.which != eDoc {
+	if n.which == eOther {
+		if o.which == eDoc || o.which == eAry {
 			return false
 		}
 
+		return bytes.Equal(n.compact(), o.compact())
+	}
+
+	if o.which == eRaw {
+		o.intoContainer()
+	}
+
+	if n.which != o.which {
+		return false
+	}
+
+	if n.which == eDoc {
 		if len(n.doc.obj) != len(o.doc.obj) {
 			return false
 		}
@@ -374,10 +350,6 @@ func (n *lazyNode) equal(o *lazyNode) bool {
 		}
 
 		return true
-	}
-
-	if o.which != eAry && !o.tryAry() {
-		return false
 	}
 
 	if len(n.ary) != len(o.ary) {
@@ -469,7 +441,7 @@ func (o Operation) ValueInterface() (interface{}, error) {
 	return nil, errors.Wrapf(ErrMissing, "operation, missing value field")
 }
 
-func isArray(buf []byte) bool {
+func checkWhich(buf []byte) int {
 Loop:
 	for _, c := range buf {
 		switch c {
@@ -478,13 +450,15 @@ Loop:
 		case '\t':
 			continue
 		case '[':
-			return true
+			return eAry
+		case '{':
+			return eDoc
 		default:
 			break Loop
 		}
 	}
 
-	return false
+	return eOther
 }
 
 func findObject(pd *container, path string, options *ApplyOptions) (container, string) {
@@ -500,8 +474,6 @@ func findObject(pd *container, path string, options *ApplyOptions) (container, s
 
 	key := split[len(split)-1]
 
-	var err error
-
 	for _, part := range parts {
 
 		next, ok := doc.get(decodePatchKey(part), options)
@@ -509,19 +481,9 @@ func findObject(pd *container, path string, options *ApplyOptions) (container, s
 		if next == nil || ok != nil {
 			return nil, ""
 		}
-
-		if isArray(*next.raw) {
-			doc, err = next.intoAry()
-
-			if err != nil {
-				return nil, ""
-			}
-		} else {
-			doc, err = next.intoDoc()
-
-			if err != nil {
-				return nil, ""
-			}
+		doc = next.intoContainer()
+		if doc == nil {
+			return nil, ""
 		}
 	}
 
@@ -784,7 +746,7 @@ func ensurePathExists(pd *container, path string, options *ApplyOptions) error {
 
 				newNode := newLazyNode(newRawMessage(rawJSONArray))
 				doc.add(part, newNode, options)
-				doc, _ = newNode.intoAry()
+				doc = newNode.intoContainer()
 
 				// Pad the new array with null values up to the required index.
 				for i := 0; i < arrIndex; i++ {
@@ -794,21 +756,12 @@ func ensurePathExists(pd *container, path string, options *ApplyOptions) error {
 				newNode := newLazyNode(newRawMessage(rawJSONObject))
 
 				doc.add(part, newNode, options)
-				doc, _ = newNode.intoDoc()
+				doc = newNode.intoContainer()
 			}
 		} else {
-			if isArray(*target.raw) {
-				doc, err = target.intoAry()
-
-				if err != nil {
-					return err
-				}
-			} else {
-				doc, err = target.intoDoc()
-
-				if err != nil {
-					return err
-				}
+			doc = target.intoContainer()
+			if doc == nil {
+				return errors.Wrapf(ErrUnknownType, "Unable to ensure path for invalid target value: %s", string(*target.raw))
 			}
 		}
 	}
@@ -847,14 +800,7 @@ func (p Patch) replace(doc *container, op Operation, options *ApplyOptions) erro
 
 	if path == "" {
 		val := op.value()
-
-		if val.which == eRaw {
-			if !val.tryDoc() {
-				if !val.tryAry() {
-					return errors.Wrapf(err, "replace operation value must be object or array")
-				}
-			}
-		}
+		val.intoContainer()
 
 		switch val.which {
 		case eAry:
@@ -1119,6 +1065,178 @@ func (p Patch) ApplyIndentWithOptions(doc []byte, indent string, options *ApplyO
 	return json.Marshal(pd)
 }
 
+func ReadValueByPath(doc []byte, path string, options *ApplyOptions) ([]byte, error) {
+	if len(doc) == 0 {
+		return doc, nil
+	}
+
+	var pd container
+	if doc[0] == '[' {
+		pd = &partialArray{}
+	} else {
+		pd = &partialDoc{}
+	}
+
+	err := json.Unmarshal(doc, pd)
+
+	if err != nil {
+		return nil, err
+	}
+
+	con, key := findObject(&pd, path, options)
+
+	if con == nil {
+		return nil, errors.Wrapf(ErrMissing, "missing path: %s", path)
+	}
+
+	val, err := con.get(key, options)
+	if err != nil && errors.Cause(err) != ErrMissing {
+		return nil, errors.Wrapf(err, "error in path: '%s'", path)
+	}
+	if val == nil {
+		return nil, nil
+	}
+
+	return val.MarshalJSON()
+}
+
+type ChildNode struct {
+	Path  string          `json:"path"`
+	Value json.RawMessage `json:"value"`
+	node  *lazyNode
+}
+
+type Filter map[string]json.RawMessage
+
+func FindChildrenByFilters(doc []byte, filters []Filter, options *ApplyOptions) (nodes []*ChildNode, err error) {
+	if len(filters) == 0 {
+		return
+	}
+	node := newLazyNode(newRawMessage(doc))
+	for _, filter := range filters {
+		keys := make([]string, 0, len(filter))
+		for querypath := range filter {
+			keys = append(keys, querypath)
+		}
+		if len(keys) == 0 {
+			continue
+		}
+
+		subpaths, err := toSubpaths(keys[0])
+		if err != nil {
+			return nil, err
+		}
+		value := filter[keys[0]]
+		v := newLazyNode(&value)
+		keys = keys[1:]
+
+		ns, err := findChildNodes(node, v, "", subpaths, options)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range keys {
+			subpaths, err := toSubpaths(key)
+			if err != nil {
+				return nil, err
+			}
+			value := filter[key]
+			v := newLazyNode(&value)
+			_ns := make([]*ChildNode, 0, len(ns))
+			for _, n := range ns {
+				if assertObject(n.node, subpaths, v, options) {
+					_ns = append(_ns, n)
+				}
+			}
+			ns = _ns
+			if len(ns) == 0 {
+				break
+			}
+		}
+		nodes = append(nodes, ns...)
+	}
+	return
+}
+
+func toSubpaths(s string) ([]string, error) {
+	subpaths := strings.Split(s, "/")
+	if len(subpaths) < 2 || subpaths[0] != "" {
+		return nil, fmt.Errorf("Invalid query path: %s", s)
+	}
+	return subpaths[1:], nil
+}
+
+func findChildNodes(node, value *lazyNode, parentpath string, subpaths []string, options *ApplyOptions) (res []*ChildNode, err error) {
+
+	node.intoContainer()
+	if node.which == eOther {
+		return
+	}
+
+	if assertObject(node, subpaths, value, options) {
+		res = append(res, &ChildNode{Path: parentpath, Value: *node.raw, node: node})
+	}
+
+	if node.which == eAry {
+		for i, n := range node.ary {
+			if n == nil {
+				continue
+			}
+			r, e := findChildNodes(n, value, fmt.Sprintf("%s/%d", parentpath, i), subpaths, options)
+			if e != nil {
+				return nil, e
+			}
+			if len(r) > 0 {
+				res = append(res, r...)
+			}
+		}
+	} else {
+		for k, n := range node.doc.obj {
+			if n == nil {
+				continue
+			}
+			r, e := findChildNodes(n, value, fmt.Sprintf("%s/%s", parentpath, encodePatchKey(k)), subpaths, options)
+			if e != nil {
+				return nil, e
+			}
+			if len(r) > 0 {
+				res = append(res, r...)
+			}
+		}
+	}
+	return
+}
+
+func assertObject(node *lazyNode, subpaths []string, value *lazyNode, options *ApplyOptions) bool {
+	last := len(subpaths) - 1
+	doc := node.intoContainer()
+	if doc == nil {
+		return false
+	}
+
+	for i, part := range subpaths {
+		next, ok := doc.get(decodePatchKey(part), options)
+		if ok != nil {
+			return false
+		}
+		if i == last {
+			if next == nil {
+				return value.isNull()
+			}
+			return next.equal(value)
+		}
+
+		if next == nil {
+			return false
+		}
+
+		doc = next.intoContainer()
+		if doc == nil {
+			return false
+		}
+	}
+	return false
+}
+
 // From http://tools.ietf.org/html/rfc6901#section-4 :
 //
 // Evaluation of each reference token begins by decoding any escaped
@@ -1128,8 +1246,13 @@ func (p Patch) ApplyIndentWithOptions(doc []byte, indent string, options *ApplyO
 
 var (
 	rfc6901Decoder = strings.NewReplacer("~1", "/", "~0", "~")
+	rfc6901Encoder = strings.NewReplacer("/", "~1", "~", "~0")
 )
 
 func decodePatchKey(k string) string {
 	return rfc6901Decoder.Replace(k)
+}
+
+func encodePatchKey(k string) string {
+	return rfc6901Encoder.Replace(k)
 }
